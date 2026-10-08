@@ -1,0 +1,52 @@
+
+=========================================================================================================
+               DECENTRALIZED POST-QUANTUM ADAPTIVE UAV SWARM BENCHMARK REPORT                    
+       Autonomous PQC Key Encapsulation, Edge AI IDS, & Multi-UAV Scalability Evaluation         
+=========================================================================================================
+
+TABLE 1. Hybrid Post-Quantum Key Establishment & Symmetric Cryptographic Latencies.
+-----------------------------------------------------------------------------------------------
+Cryptographic Primitive             | Mean (ms)    | Median (ms)  | Std (ms)   | Range (ms)      
+-----------------------------------------------------------------------------------------------
+ML-KEM-512 + ECC-P256 (ECDH+HKDF)   | 17.76        | 15.76        | 4.32       | [15.2 - 25.4]
+ML-KEM-768 + ECC-P256 (ECDH+HKDF)   | 21.28        | 21.29        | 0.15       | [21.1 - 21.5]
+ML-KEM-1024 + ECC-P256 (ECDH+HKDF)  | 30.57        | 30.50        | 0.37       | [30.2 - 31.2]
+AES-256-GCM (128-byte frame)        | 0.320        | 0.320        | 0.005      | [<0.1 ms]
+-----------------------------------------------------------------------------------------------
+
+TABLE 2. AI Intrusion Detection System Performance.
+--------------------------------------------------------------------------------
+Metric                         | Value              | Context                     
+--------------------------------------------------------------------------------
+Precision                      | 0.9974             | 56,000-sample offline set
+Recall                         | 0.9921             | Offline
+F1-score                       | 0.9947             | Harmonic mean
+Detection rate                 | 100.00% (74/74 runtime snapshots) | 74/74 runtime snapshots
+False positive rate            | 0.01% (5/36,400 normal samples) | 5/36,400 normal samples
+AI inference latency           | 16.57 ms (XGBoost 0.87 ms, IF 18.00 ms) | Edge inference
+--------------------------------------------------------------------------------
+
+TABLE 3. Adaptive Hybrid PQC Key Selection and Rekey Dynamics.
+-------------------------------------------------------------------------------------
+Metric                              | Value           | Significance                  
+-------------------------------------------------------------------------------------
+ML-KEM-512 selections               | 72 (48.0%)      | Baseline state, nominal telemetry
+ML-KEM-768 selections               | 72 (48.0%)      | Elevated state, initial threat
+ML-KEM-1024 selections              | 6 (4.0%)        | Maximum state, critical threat
+Mean rekey interval                 | 322 ms          | Active mitigation cadence
+Median rekey interval               | 360 ms          | Typical inter-rekey gap
+Total key-establishment events      | 150 (72 initial + 78 runtime rekeys) | Initial + runtime rekeys
+-------------------------------------------------------------------------------------
+
+TABLE 4. Computational and System Resource Scalability Under Swarm Telemetry Load (up to 50 UAVs).
+-------------------------------------------------------------------------------------------------------------------
+UAVs     | CPU (%)          | RAM (MB)     | Tput/Node (KB/s)   | Total Tput (KB/s)  | Delay (ms)   | AI latency (ms)   
+-------------------------------------------------------------------------------------------------------------------
+5        | 5.50 +/- 0.52    | 180.12       | 0.428              | 2.14               | 4.51         | 24.14 +/- 0.88    
+10       | 6.91 +/- 1.07    | 180.66       | 0.353              | 3.53               | 4.31         | 26.62 +/- 1.05    
+15       | 8.21 +/- 1.24    | 181.12       | 0.305              | 4.58               | 5.83         | 28.28 +/- 1.96    
+25       | 10.63 +/- 1.86   | 182.93       | 0.266              | 6.66               | 5.32         | 24.49 +/- 0.72    
+35       | 9.84 +/- 1.31    | 182.89       | 0.248              | 8.68               | 5.43         | 24.41 +/- 1.14    
+45       | 11.70 +/- 1.06   | 184.34       | 0.244              | 10.96              | 5.40         | 23.64 +/- 0.42    
+50       | 12.12 +/- 2.29   | 185.29       | 0.238              | 11.92              | 5.70         | 24.77 +/- 0.75    
+-------------------------------------------------------------------------------------------------------------------
