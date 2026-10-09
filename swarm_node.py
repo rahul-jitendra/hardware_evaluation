@@ -147,9 +147,11 @@ class DecentralizedSwarmNode:
         self.battery_cutoff = 10.20
         self.status = "STANDBY" if self.role == "backup" else "FLYING"
 
-        # Backup Drone Takeover Tracking (Sajid et al. Eq. 4)
+        # Backup Drone Takeover Tracking & Fault Location Navigation
         self.active_backup_target: Optional[str] = None
         self.last_primary_heartbeats: Dict[str, float] = {}
+        self.peer_last_telemetry: Dict[str, Dict[str, Any]] = {}
+        self.fault_target_pos: Optional[Dict[str, float]] = None
         self.heartbeat_timeout_sec = 10.0
 
         # MQTT Clients
@@ -605,7 +607,27 @@ class DecentralizedSwarmNode:
         elif self.status in ("LANDED", "STANDBY"):
             return
 
-        # Linear movement along waypoints
+        # Backup Drone: Fly directly to the fault drone's coordinates and immediately LAND on arrival (no other waypoints)
+        if self.status == "ACTIVE_BACKUP":
+            if not self.fault_target_pos:
+                self.fault_target_pos = {"lat": self.lat, "lon": self.lon, "alt": self.alt}
+
+            t_lat = self.fault_target_pos["lat"]
+            t_lon = self.fault_target_pos["lon"]
+            dlat = (t_lat - self.lat) * 0.1
+            dlon = (t_lon - self.lon) * 0.1
+            self.lat += dlat
+            self.lon += dlon
+
+            if abs(t_lat - self.lat) < 0.00005 and abs(t_lon - self.lon) < 0.00005:
+                target_name = self.active_backup_target.upper() if self.active_backup_target else "FAULT DRONE"
+                self.log("=" * 65, tag="SUCCESS")
+                self.log(f"ARRIVED AT FAULT POINT OF {target_name}! Initiating autonomous LANDING at fault coordinates (Lat={self.lat:.6f}, Lon={self.lon:.6f})...", tag="SUCCESS")
+                self.log("=" * 65, tag="SUCCESS")
+                self.status = "LANDING"
+            return
+
+        # Linear movement along waypoints for primary flying nodes
         target_wp = WAYPOINT_COORDS[self.current_wp_idx]
         dlat = (target_wp["lat"] - self.lat) * 0.1
         dlon = (target_wp["lon"] - self.lon) * 0.1
@@ -686,7 +708,13 @@ class DecentralizedSwarmNode:
         # Handle plain discovery frame (trigger PQC handshake or evaluate spoof injection)
         if "plain_discovery" in payload:
             disc_telem = payload["plain_discovery"]
-            if isinstance(disc_telem, dict) and "lat" in disc_telem:
+            if isinstance(disc_telem, dict) and "lat" in disc_telem and "lon" in disc_telem:
+                self.peer_last_telemetry[sender] = {
+                    "lat": float(disc_telem["lat"]),
+                    "lon": float(disc_telem["lon"]),
+                    "alt": float(disc_telem.get("alt", self.alt)),
+                    "timestamp": time.time()
+                }
                 # Evaluate telemetry for anomalies (e.g. spoofing)
                 ids_result = self.ids.evaluate_peer_telemetry(sender, disc_telem, raw_packet_size=128)
                 self._apply_security_decision(sender, ids_result)
@@ -732,6 +760,14 @@ class DecentralizedSwarmNode:
             telem = json.loads(plain_bytes.decode('utf-8'))
         except Exception:
             return
+
+        if isinstance(telem, dict) and "lat" in telem and "lon" in telem:
+            self.peer_last_telemetry[sender] = {
+                "lat": float(telem["lat"]),
+                "lon": float(telem["lon"]),
+                "alt": float(telem.get("alt", self.alt)),
+                "timestamp": time.time()
+            }
 
         # Log incoming decrypted peer telemetry (READ DATA)
         pqc_lvl = p_info["kyber_param"]
@@ -800,7 +836,17 @@ class DecentralizedSwarmNode:
                 loss_sec = t_now - last_hb
                 if loss_sec >= self.heartbeat_timeout_sec:
                     self.log(f"TIMEOUT TRIGGER: Primary {primary_id} silent for {loss_sec:.1f}s (exceeds {self.heartbeat_timeout_sec}s cutoff)!", tag="TAKEOVER")
-                    self._trigger_backup_takeover(primary_id, f"Silent node timeout ({loss_sec:.1f}s)")
+                    last_telem = self.peer_last_telemetry.get(primary_id, {})
+                    target_lat = last_telem.get("lat", self.lat)
+                    target_lon = last_telem.get("lon", self.lon)
+                    target_alt = last_telem.get("alt", self.alt)
+                    self._trigger_backup_takeover(
+                        primary_id,
+                        f"Silent node timeout ({loss_sec:.1f}s)",
+                        target_lat=float(target_lat),
+                        target_lon=float(target_lon),
+                        target_alt=float(target_alt)
+                    )
                     break
 
     def _handle_rogue_alert(self, packet: SwarmPacket):
@@ -813,7 +859,17 @@ class DecentralizedSwarmNode:
 
         # If Backup Drone, immediately take over the rogue primary drone's mission
         if self.role == "backup" and self.status != "ACTIVE_BACKUP":
-            self._trigger_backup_takeover(rogue_id, f"Primary node compromised and isolated by AI IDS ({p['conformal_set']})")
+            last_telem = self.peer_last_telemetry.get(rogue_id, {})
+            target_lat = last_telem.get("lat", self.lat)
+            target_lon = last_telem.get("lon", self.lon)
+            target_alt = last_telem.get("alt", self.alt)
+            self._trigger_backup_takeover(
+                rogue_id,
+                f"Primary node compromised and isolated by AI IDS ({p['conformal_set']})",
+                target_lat=float(target_lat),
+                target_lon=float(target_lon),
+                target_alt=float(target_alt)
+            )
 
     def _handle_node_failure(self, packet: SwarmPacket):
         p = packet.payload
@@ -822,25 +878,43 @@ class DecentralizedSwarmNode:
             return
         self.log(f"ALERT: Drone {failed_id.upper()} initiated on-site emergency landing. Handing over mission to Backup Drone.", tag="TAKEOVER")
         if self.role == "backup" and self.status != "ACTIVE_BACKUP":
-            if "waypoint_idx" in p:
-                self.current_wp_idx = p["waypoint_idx"]
-            self._trigger_backup_takeover(failed_id, f"On-site landing failover triggered by {failed_id} ('b' key)")
+            last_telem = self.peer_last_telemetry.get(failed_id, {})
+            target_lat = p.get("last_lat") or last_telem.get("lat") or self.lat
+            target_lon = p.get("last_lon") or last_telem.get("lon") or self.lon
+            target_alt = p.get("last_alt") or last_telem.get("alt") or self.alt
+            self._trigger_backup_takeover(
+                failed_id,
+                f"On-site landing failover triggered by {failed_id} ('b' key)",
+                target_lat=float(target_lat),
+                target_lon=float(target_lon),
+                target_alt=float(target_alt)
+            )
 
-    def _trigger_backup_takeover(self, target_drone_id: str, reason: str):
+    def _trigger_backup_takeover(self, target_drone_id: str, reason: str, target_lat: Optional[float] = None, target_lon: Optional[float] = None, target_alt: Optional[float] = None):
         self.status = "ACTIVE_BACKUP"
         self.active_backup_target = target_drone_id
+        t_lat = target_lat if target_lat is not None else self.lat
+        t_lon = target_lon if target_lon is not None else self.lon
+        t_alt = target_alt if target_alt is not None else self.alt
+        self.fault_target_pos = {
+            "lat": float(t_lat),
+            "lon": float(t_lon),
+            "alt": float(t_alt)
+        }
         self.log("=" * 65, tag="TAKEOVER")
         self.log("*** AUTONOMOUS BACKUP MISSION TAKEOVER ACTIVATED ***", tag="TAKEOVER")
-        self.log(f"Replacing Target Drone : {target_drone_id}", tag="TAKEOVER")
+        self.log(f"Replacing Faulty Drone : {target_drone_id.upper()}", tag="TAKEOVER")
+        self.log(f"Fault Drone Target Coords: Lat={t_lat:.6f}, Lon={t_lon:.6f}, Alt={t_alt:.1f}m", tag="TAKEOVER")
         self.log(f"Trigger Reason         : {reason}", tag="TAKEOVER")
-        self.log(f"New Status             : {self.status}", tag="TAKEOVER")
-        self.log(f"Resuming Autonomous Mission Waypoint Navigation...", tag="TAKEOVER")
+        self.log(f"Mission Directive      : Direct flight to fault location -> Auto-LAND (Skipping pre-set waypoints)", tag="TAKEOVER")
         self.log("=" * 65, tag="TAKEOVER")
 
         # Broadcast Takeover Alert
         alert_payload = {
             "backup_node": self.node_id,
             "target_node": target_drone_id,
+            "target_lat": t_lat,
+            "target_lon": t_lon,
             "timestamp": time.time(),
             "reason": reason
         }

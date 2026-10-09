@@ -1,0 +1,75 @@
+================================================================================
+DECENTRALIZED POST-QUANTUM UAV SWARM: 3-DRONE DEPLOYMENT COMMANDS
+(2 PRIMARY DRONES + 1 BACKUP DRONE)
+================================================================================
+DRONE 1 (Primary - Linux)   : 100.77.92.58   (/dev/ttyACM0)
+DRONE 2 (Primary - Linux)   : 100.68.223.24  (/dev/ttyACM0)
+BACKUP DRONE (Standby - Win): 100.101.147.107 (COM3)
+================================================================================
+
+--------------------------------------------------------------------------------
+STEP 1: START MQTT MESH BROKER ON EACH DRONE (Terminal 1)
+--------------------------------------------------------------------------------
+
+[On Drone 1 (Linux - 100.77.92.58)]:
+python3 broker_server.py --host 0.0.0.0 --port 1883
+
+[On Drone 2 (Linux - 100.68.223.24)]:
+python3 broker_server.py --host 0.0.0.0 --port 1883
+
+[On Backup Drone (Windows - 100.101.147.107)]:
+python broker_server.py --host 0.0.0.0 --port 1883
+
+
+--------------------------------------------------------------------------------
+STEP 2: LAUNCH DRONE NODES (Terminal 2)
+--------------------------------------------------------------------------------
+
+[Terminal 2 - On Drone 1 (Linux - 100.77.92.58)]:
+python3 drone_node.py --id drone_1 --role primary --broker 100.77.92.58 --port 1883 --peers 100.68.223.24 100.101.147.107 --mavlink /dev/ttyACM0 --mavlink-baud 57600
+
+[Terminal 2 - On Drone 2 (Linux - 100.68.223.24)]:
+python3 drone_node.py --id drone_2 --role primary --broker 100.68.223.24 --port 1883 --peers 100.77.92.58 100.101.147.107 --mavlink /dev/ttyACM0 --mavlink-baud 57600
+
+[Terminal 2 - On Backup Drone (Windows - 100.101.147.107)]:
+python drone_node.py --id backup_drone --role backup --broker 100.101.147.107 --port 1883 --peers 100.77.92.58 100.68.223.24 --mavlink COM3 --mavlink-baud 57600 --battery 12.50 --health 0.98 --gps-strength 0.95
+
+
+>>> NOTE FOR BENCH TESTING (INDOORS / PROPS OFF):
+If bench testing indoors without GPS lock, add --force-arm to bypass pre-arm checks:
+  Drone 1 : python3 drone_node.py --id drone_1 --role primary --broker 100.77.92.58 --port 1883 --peers 100.68.223.24 100.101.147.107 --mavlink /dev/ttyACM0 --mavlink-baud 57600 --force-arm
+  Drone 2 : python3 drone_node.py --id drone_2 --role primary --broker 100.68.223.24 --port 1883 --peers 100.77.92.58 100.101.147.107 --mavlink /dev/ttyACM0 --mavlink-baud 57600 --force-arm
+  Backup  : python drone_node.py --id backup_drone --role backup --broker 100.101.147.107 --port 1883 --peers 100.77.92.58 100.68.223.24 --mavlink COM3 --mavlink-baud 57600 --battery 12.50 --health 0.98 --gps-strength 0.95 --force-arm
+
+
+--------------------------------------------------------------------------------
+STEP 3: RUNTIME HOTKEYS (ON DRONE CONSOLE)
+--------------------------------------------------------------------------------
+Type directly into any running node console:
+  b + Enter      -> Triggers Emergency Landing & summons Backup Drone
+  t + Enter      -> Manual Guided Takeoff to target altitude
+  status + Enter -> Real-time GPS, battery, altitude, and MAVLink link quality
+  q + Enter      -> Safely terminates the drone daemon
+
+
+--------------------------------------------------------------------------------
+STEP 4: FAILOVER & ATTACK VERIFICATION
+--------------------------------------------------------------------------------
+
+1. Test 10s Silent Timeout Failover:
+   - Kill Drone 1 (Ctrl+C on 100.77.92.58) or Drone 2 (Ctrl+C on 100.68.223.24).
+   - After 10s, Backup Drone on Windows detects the loss, takes off, flies
+     directly to the failed drone's last reported GPS coordinates, and lands on site.
+
+2. Test Emergency Land Takeover:
+   - Press 'b' + Enter on Drone 1 or Drone 2 terminal.
+   - The primary initiates on-site emergency landing.
+   - The Windows Backup Drone activates, flies directly to that drone's coordinates, and lands.
+
+3. Cyber Attack Testing (from any terminal):
+   # GPS Spoofing targeting Drone 1:
+   python3 attacks/spoof_attack.py --broker 100.77.92.58 --attacker-id drone_1 --count 15
+
+   # Packet Replay targeting Drone 2:
+   python3 attacks/replay_attack.py --broker 100.68.223.24 --target-drone drone_2
+================================================================================
